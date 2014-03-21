@@ -35,18 +35,26 @@ class Client(object):
         self.sent_messages.append(operation)
         self.num_sent_messages += 1
 
+    def id(self):
+        return self
+
     def add_remote(self, remote):
         self.remotes.append(remote)
 
     def send(self, operation):
         for remote in self.remotes:
-            remote.receive(operation, self.num_received_messages)
+            remote.receive(self.id(), operation, self.num_received_messages)
 
-    def receive(self, operation, num_received_messages):
+    def receive(self, sending_remote_id, operation, num_received_messages):
         if self.num_sent_messages > num_received_messages:
             for message in reversed(self.sent_messages):
                 message.reverted().apply(self.data)
             self.sent_messages = []
         else:
             operation.apply(self.data)
+
+        for remote in self.remotes:
+            if remote.id() != sending_remote_id:
+                remote.receive(self.id(), operation, self.num_received_messages)
+
         self.num_received_messages += 1

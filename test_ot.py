@@ -1,6 +1,37 @@
 import unittest
 from ot import Add, Client
 
+class Remotes(object):
+    def __init__(self):
+        self.remotes = []
+
+    def call(self):
+        for remote in self.remotes:
+            remote.call()
+
+    def create(self, remote):
+        capturing_remote = CaptureCallToReceive(remote)
+        self.remotes.append(capturing_remote)
+        return capturing_remote
+
+class ServerAndTwoClients(object):
+    def __init__(self):
+        self.remotes = Remotes()
+
+        self.server = Client()
+        self.client1 = Client()
+        self.client2 = Client()
+
+        self.remote_server = self.remotes.create(self.server)
+        self.remote_client1 = self.remotes.create(self.client1)
+        self.remote_client2 = self.remotes.create(self.client2)
+
+        self.server.add_remote(self.remote_client1)
+        self.server.add_remote(self.remote_client2)
+        self.client1.add_remote(self.remote_server)
+        self.client2.add_remote(self.remote_server)
+
+
 class CaptureCallToReceive(object):
     def __init__(self, remote):
         self.remote = remote
@@ -13,6 +44,9 @@ class CaptureCallToReceive(object):
         for args in self.argss:
             self.remote.receive(*args)
         self.argss = []
+
+    def id(self):
+        return self.remote.id()
 
 class TestTransform(unittest.TestCase):
     def test_generating_operation_changes_data(self):
@@ -99,3 +133,16 @@ class TestTransform(unittest.TestCase):
 
         self.assertEquals(client1.data, ['o', 'x', 'y'])
         self.assertEquals(client2.data, ['o', 'x', 'y'])
+
+    def test_operations_are_forwarded_to_multiple_clients(self):
+        f = ServerAndTwoClients()
+
+        f.client1.generate(Add(0, 'x'))
+        f.client1.generate(Add(1, 'y'))
+        f.remotes.call()
+
+        f.client2.generate(Add(0, 'o'))
+        f.remotes.call()
+
+        self.assertEquals(f.client1.data, ['o', 'x', 'y'])
+        self.assertEquals(f.client2.data, ['o', 'x', 'y'])
