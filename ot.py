@@ -1,6 +1,3 @@
-def xform(operation1, operation2):
-    return operation2.reverted(), operation1.reverted()
-
 class Remove(object):
     def __init__(self, position, value):
         self.position = position
@@ -28,9 +25,9 @@ class Client(object):
     def __init__(self):
         self.data = []
         self.remotes = []
+        self.sent_messages = []
         self.num_sent_messages = 0
         self.num_received_messages = 0
-        self.sent_messages = []
 
     def generate(self, operation):
         operation.apply(self.data)
@@ -43,11 +40,13 @@ class Client(object):
 
     def send(self, operation):
         for remote in self.remotes:
-            remote.receive(operation, self.num_sent_messages, self.num_received_messages)
+            remote.receive(operation, self.num_received_messages)
 
-    def receive(self, operation, num_sent_messages, num_received_messages):
-        assert self.num_received_messages == num_sent_messages
-        for i, message in enumerate(self.sent_messages):
-            operation, self.sent_messages[i] = xform(operation, message)
-        operation.apply(self.data)
+    def receive(self, operation, num_received_messages):
+        if self.num_sent_messages > num_received_messages:
+            for message in reversed(self.sent_messages):
+                message.reverted().apply(self.data)
+            self.sent_messages = []
+        else:
+            operation.apply(self.data)
         self.num_received_messages += 1
