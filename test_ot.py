@@ -6,14 +6,53 @@ class Remotes(object):
     def __init__(self):
         self.remotes = []
 
-    def call(self):
-        for remote in self.remotes:
-            remote.call()
+    def process_messages(self):
+        while True:
+            if not any([remote.process_messages() for remote in self.remotes]):
+                break
 
-    def create(self, remote):
-        capturing_remote = CaptureCallToReceive(remote)
+    def create(self, client):
+        capturing_remote = Remote(client)
         self.remotes.append(capturing_remote)
         return capturing_remote
+
+
+class Remote(object):
+    def __init__(self, client):
+        self.client = client
+        self.args_queue = Queue.Queue()
+
+    def send_message(self, *args):
+        self.args_queue.put(args)
+
+    def process_messages(self):
+        had_messages = False
+        try:
+            while True:
+                args = self.args_queue.get_nowait()
+                self.client.receive(*args)
+                had_messages = True
+        except Queue.Empty:
+            pass
+        return had_messages
+
+    def client_id(self):
+        return self.client.client_id()
+
+
+class TwoClients(object):
+    def __init__(self):
+        self.remotes = Remotes()
+
+        self.client1 = Client()
+        self.client2 = Client()
+
+        self.remote_client1 = self.remotes.create(self.client1)
+        self.remote_client2 = self.remotes.create(self.client2)
+
+        self.client1.add_remote(self.remote_client2)
+        self.client2.add_remote(self.remote_client1)
+
 
 class ServerAndTwoClients(object):
     def __init__(self):
@@ -33,25 +72,6 @@ class ServerAndTwoClients(object):
         self.client2.add_remote(self.remote_server)
 
 
-class CaptureCallToReceive(object):
-    def __init__(self, remote):
-        self.remote = remote
-        self.args_queue = Queue.Queue()
-
-    def receive(self, *args):
-        self.args_queue.put(args)
-
-    def call(self):
-        try:
-            while True:
-                args = self.args_queue.get_nowait()
-                self.remote.receive(*args)
-        except Queue.Empty:
-            pass
-
-    def id(self):
-        return self.remote.id()
-
 class TestTransform(unittest.TestCase):
     def test_generating_operation_changes_data(self):
         client = Client()
@@ -59,100 +79,70 @@ class TestTransform(unittest.TestCase):
         self.assertEquals(client.data, ['x'])
 
     def test_connected_client_updates(self):
-        client1 = Client()
-        client2 = Client()
-        client1.add_remote(client2)
-        client2.add_remote(client1)
+        f = TwoClients()
 
-        client1.generate(Add(0, 'x'))
+        f.client1.generate(Add(0, 'x'))
 
-        self.assertEquals(client1.data, ['x'])
-        self.assertEquals(client2.data, ['x'])
+        f.remotes.process_messages()
+
+        self.assertEquals(f.client1.data, ['x'])
+        self.assertEquals(f.client2.data, ['x'])
 
     def test_conflicting_adds_are_reverted(self):
-        client1 = Client()
-        client2 = Client()
+        f = TwoClients()
 
-        remote1 = CaptureCallToReceive(client1)
-        remote2 = CaptureCallToReceive(client2)
+        f.client1.generate(Add(0, 'x'))
+        f.client2.generate(Add(0, 'y'))
 
-        client1.add_remote(remote2)
-        client2.add_remote(remote1)
+        self.assertEquals(f.client1.data, ['x'])
+        self.assertEquals(f.client2.data, ['y'])
 
-        client1.generate(Add(0, 'x'))
-        client2.generate(Add(0, 'y'))
+        f.remotes.process_messages()
 
-        self.assertEquals(client1.data, ['x'])
-        self.assertEquals(client2.data, ['y'])
-
-        remote1.call()
-        remote2.call()
-
-        self.assertEquals(client1.data, [])
-        self.assertEquals(client2.data, [])
+        self.assertEquals(f.client1.data, [])
+        self.assertEquals(f.client2.data, [])
 
     def test_multiple_concurrent_pending_message_are_reverted(self):
-        client1 = Client()
-        client2 = Client()
+        f = TwoClients()
 
-        remote1 = CaptureCallToReceive(client1)
-        remote2 = CaptureCallToReceive(client2)
+        f.client1.generate(Add(0, 'x'))
+        f.client1.generate(Add(1, 'y'))
 
-        client1.add_remote(remote2)
-        client2.add_remote(remote1)
+        f.client2.generate(Add(0, 'o'))
 
-        client1.generate(Add(0, 'x'))
-        client1.generate(Add(1, 'y'))
+        self.assertEquals(f.client1.data, ['x', 'y'])
+        self.assertEquals(f.client2.data, ['o'])
 
-        client2.generate(Add(0, 'o'))
+        f.remotes.process_messages()
 
-        self.assertEquals(client1.data, ['x', 'y'])
-        self.assertEquals(client2.data, ['o'])
-
-        remote1.call()
-        remote2.call()
-
-        self.assertEquals(client1.data, [])
-        self.assertEquals(client2.data, [])
+        self.assertEquals(f.client1.data, [])
+        self.assertEquals(f.client2.data, [])
 
     def test_multiple_pending_messages_are_applied(self):
-        client1 = Client()
-        client2 = Client()
+        f = TwoClients()
 
-        remote1 = CaptureCallToReceive(client1)
-        remote2 = CaptureCallToReceive(client2)
+        f.client1.generate(Add(0, 'x'))
+        f.client1.generate(Add(1, 'y'))
+        f.remotes.process_messages()
 
-        client1.add_remote(remote2)
-        client2.add_remote(remote1)
+        f.client2.generate(Add(0, 'o'))
+        f.remotes.process_messages()
 
-        client1.generate(Add(0, 'x'))
-        client1.generate(Add(1, 'y'))
-
-        remote1.call()
-        remote2.call()
-
-        client2.generate(Add(0, 'o'))
-
-        remote1.call()
-        remote2.call()
-
-        self.assertEquals(client1.data, ['o', 'x', 'y'])
-        self.assertEquals(client2.data, ['o', 'x', 'y'])
+        self.assertEquals(f.client1.data, ['o', 'x', 'y'])
+        self.assertEquals(f.client2.data, ['o', 'x', 'y'])
 
     def test_operations_are_forwarded_to_multiple_clients(self):
         f = ServerAndTwoClients()
 
         f.client1.generate(Add(0, 'x'))
         f.client1.generate(Add(1, 'y'))
-        f.remotes.call()
-        f.remotes.call()
+        f.remotes.process_messages()
 
         self.assertEquals(f.client1.data, ['x', 'y'])
         self.assertEquals(f.client2.data, ['x', 'y'])
 
         f.client2.generate(Add(0, 'o'))
-        f.remotes.call()
-        f.remotes.call()
+        f.remotes.process_messages()
 
         self.assertEquals(f.client1.data, ['o', 'x', 'y'])
         self.assertEquals(f.client2.data, ['o', 'x', 'y'])
@@ -166,10 +156,7 @@ class TestTransform(unittest.TestCase):
         self.assertEquals(f.client1.data, ['x'])
         self.assertEquals(f.client2.data, ['y'])
 
-        f.remotes.call()
-        f.remotes.call()
-        f.remotes.call()
-        f.remotes.call()
+        f.remotes.process_messages()
 
         self.assertEquals(f.client1.data, [])
         self.assertEquals(f.client2.data, [])

@@ -1,12 +1,3 @@
-def xform(a, b):
-    if is_reverted(a):
-        return Noop, Compose(Reverted(b), a)
-    else:
-        return Reverted(a), Reverted(b)
-
-def is_reverted(obj):
-    return hasattr(obj, '_is_reverted')
-
 class Reverted(object):
     def __init__(self, action):
         self.action = action._reverted()
@@ -77,7 +68,7 @@ class Session(object):
             return operation
 
     def send(self, operation, sending_remote_id):
-        self.remote.receive(sending_remote_id, operation, self.num_received_messages)
+        self.remote.send_message(sending_remote_id, operation, self.num_received_messages)
         self.sent_messages.append([self.num_sent_messages, operation])
         self.num_sent_messages += 1
 
@@ -86,16 +77,16 @@ class Client(object):
         self.data = []
         self.sessions = {}
 
-    def id(self):
+    def client_id(self):
         return self
 
     def add_remote(self, remote):
-        self.sessions[remote.id()] = Session(remote)
+        self.sessions[remote.client_id()] = Session(remote)
 
     def generate(self, operation):
         operation.apply(self.data)
         for session in self.sessions.values():
-            session.send(operation, self.id())
+            session.send(operation, self.client_id())
 
     def receive(self, sending_remote_id, operation, num_received_messages):
         session = self.sessions[sending_remote_id]
@@ -110,4 +101,4 @@ class Client(object):
     def _send_to_other_sessions(self, sending_remote_id, operation):
         for id, other_session in self.sessions.iteritems():
             if id != sending_remote_id:
-                other_session.send(operation, self.id())
+                other_session.send(operation, self.client_id())
