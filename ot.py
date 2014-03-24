@@ -1,24 +1,34 @@
 from operations import Noop, Compose, Reverted
 
+def xform(a, b):
+    if is_reverted(b):
+        return Noop(), Compose([Reverted(a), b])
+    if is_reverted(a):
+        return Compose([Reverted(b), a]), Noop()
+    else:
+        return Reverted(b), Reverted(a)
+
+def is_reverted(obj):
+    return hasattr(obj, '_is_reverted')
+
 class Session(object):
     def __init__(self, remote):
-        self.remote =remote
+        self.remote = remote
         self.num_sent_messages = 0
         self.num_received_messages = 0
         self.sent_messages = []
 
     def remove_processed_messages(self, num_received_messages):
-        self.sent_messages = [(num, message)
+        self.sent_messages = [[num, message]
             for (num, message) in self.sent_messages
             if num >= num_received_messages]
 
     def transform_operation(self, operation):
-        if self.sent_messages:
-            result = Reverted(Compose([op for (num, op) in self.sent_messages]))
-            self.sent_messages = [(self.num_sent_messages - 1, Noop())]
-            return result
-        else:
-            return operation
+
+        for i, (num, op) in enumerate(self.sent_messages):
+            self.sent_messages[i][1], operation = xform(op, operation)
+
+        return operation
 
     def send(self, operation, sending_remote_id):
         self.remote.send_message(sending_remote_id, operation, self.num_received_messages)
