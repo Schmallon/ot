@@ -1,5 +1,6 @@
 import unittest
-from ot import Add, Client
+from ot import Client
+from operations import Add
 import Queue
 
 class Remotes(object):
